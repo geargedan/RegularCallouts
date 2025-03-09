@@ -1,0 +1,101 @@
+using System;
+using System.Collections.Generic;
+using Rage;
+using LSPD_First_Response.Mod.Callouts;
+using LSPD_First_Response.Mod.API;
+
+[CalloutInfo("GangFight", CalloutProbability.Medium)]
+public class GangFightCallout : Callout
+{
+    private Vector3 spawnPoint;
+    private List<Ped> gangMembers1 = new List<Ped>();
+    private List<Ped> gangMembers2 = new List<Ped>();
+    private Blip locationBlip;
+    private bool fightStarted = false;
+    private bool playerArrived = false;
+    private Random rnd = new Random();
+
+    public override bool OnBeforeCalloutDisplayed()
+    {
+        spawnPoint = World.GetNextPositionOnStreet(Game.LocalPlayer.Character.Position.Around(500f));
+        ShowCalloutAreaBlipBeforeAccepting(spawnPoint, 50f);
+        AddMinimumDistanceCheck(100f, spawnPoint);
+        CalloutMessage = "Gang Fight in Progress";
+        CalloutPosition = spawnPoint;
+        Functions.PlayScannerAudioUsingPosition("WE_HAVE CRIME_GANG_FIGHT IN_OR_ON_POSITION", spawnPoint);
+        return base.OnBeforeCalloutDisplayed();
+    }
+
+    public override bool OnCalloutAccepted()
+    {
+        Game.DisplayNotification("Respond to the scene and break up the fight.");
+        locationBlip = new Blip(spawnPoint);
+        locationBlip.Color = System.Drawing.Color.Red;
+        locationBlip.EnableRoute(System.Drawing.Color.Blue);
+
+        // Spawn gang members
+        for (int i = 0; i < 4; i++)
+        {
+            gangMembers1.Add(new Ped("g_m_y_ballasout_01", spawnPoint.Around(5f), 0f));
+            gangMembers2.Add(new Ped("g_m_y_famca_01", spawnPoint.Around(5f), 0f));
+        }
+
+        GameFiber.StartNew(StartFight);
+        return base.OnCalloutAccepted();
+    }
+
+    public override void Process()
+    {
+        base.Process();
+        if (!playerArrived && Game.LocalPlayer.Character.Position.DistanceTo(spawnPoint) < 30f)
+        {
+            playerArrived = true;
+            Game.DisplayNotification("~r~Warning:~w~ Gang members are fighting!");
+        }
+
+        if (fightStarted && gangMembers1.TrueForAll(g => !g.IsAlive) && gangMembers2.TrueForAll(g => !g.IsAlive))
+        {
+            End();
+        }
+    }
+
+    private void StartFight()
+    {
+        GameFiber.Sleep(3000);
+        foreach (Ped gang1 in gangMembers1)
+        {
+            gang1.Tasks.FightAgainst(gangMembers2[rnd.Next(gangMembers2.Count)]);
+        }
+        foreach (Ped gang2 in gangMembers2)
+        {
+            gang2.Tasks.FightAgainst(gangMembers1[rnd.Next(gangMembers1.Count)]);
+        }
+        fightStarted = true;
+        GameFiber.Sleep(15000);
+        EscalateToGunfight();
+    }
+
+    private void EscalateToGunfight()
+    {
+        if (!playerArrived) // If player isn't on scene, escalate to guns
+        {
+            Game.DisplayNotification("Gang fight is escalating! Weapons are being drawn!");
+            foreach (Ped gang1 in gangMembers1)
+            {
+                gang1.Inventory.GiveNewWeapon("WEAPON_PISTOL", 100, true);
+            }
+            foreach (Ped gang2 in gangMembers2)
+            {
+                gang2.Inventory.GiveNewWeapon("WEAPON_PISTOL", 100, true);
+            }
+        }
+    }
+
+    public override void End()
+    {
+        base.End();
+        locationBlip?.Delete();
+        foreach (Ped p in gangMembers1) if (p.Exists()) p.Dismiss();
+        foreach (Ped p in gangMembers2) if (p.Exists()) p.Dismiss();
+    }
+}
